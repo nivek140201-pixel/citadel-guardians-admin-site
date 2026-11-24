@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Play Citadel Guardians Admin Server, a 3D battlefield sandbox for summoning units, enemies, mutations, and testing battles.">
+<meta name="robots" content="index,follow">
+<title>Citadel Guardians Admin Server - 3D Battle Sandbox</title>
+<style>
+  :root{color-scheme:dark}
+  *{box-sizing:border-box}
+  body{margin:0;overflow:hidden;background:#101820;font-family:system-ui,"Malgun Gothic",sans-serif;color:#fff}
+  #game{position:fixed;inset:0}
+  canvas{display:block}
+  #hud{position:fixed;inset:0;pointer-events:none}
+  .panel{background:rgba(10,18,28,.9);border:1px solid rgba(255,255,255,.2);border-radius:11px;box-shadow:0 8px 26px #0007;padding:11px 13px;backdrop-filter:blur(6px)}
+  #stats{position:absolute;top:12px;left:12px;line-height:1.55}
+  #adminPanel{position:absolute;right:12px;top:12px;width:min(380px,calc(100vw - 24px));max-height:calc(100vh - 92px);display:none;pointer-events:auto}
+  #adminPanel.open{display:block}
+  #adminPanel h2{margin:0 0 8px;color:#ffd166;font-size:18px}
+  #adminPanel h3{margin:10px 0 5px;color:#ffd166;font-size:13px}
+  .scroll{overflow:auto;max-height:calc(100vh - 180px);padding-right:3px}
+  select,button{font:inherit}
+  select{width:100%;padding:8px 9px;border-radius:7px;background:#1a2c3d;color:#fff;border:1px solid #536a7f}
+  .spawnButton{width:100%;margin-top:9px;padding:9px;border:0;border-radius:8px;background:#e9a93b;color:#1c1b16;font-weight:900;cursor:pointer}
+  .spawnButton:hover,#battleButton:hover{filter:brightness(1.12)}
+  #panelToggle,#battleButton{position:absolute;bottom:14px;pointer-events:auto;border:1px solid #71869b;border-radius:8px;padding:10px 16px;background:#25374b;color:white;font:inherit;font-weight:800;cursor:pointer}
+  #panelToggle{right:14px}
+  #battleButton{left:50%;transform:translateX(-50%);background:#c44845;min-width:145px}
+  #battleButton.active{background:#54b678;color:#112318}
+  #message{position:absolute;top:20%;left:50%;transform:translateX(-50%);background:#111e;padding:10px 16px;border-radius:9px;font-weight:700;opacity:0;transition:opacity .2s}
+  #message.show{opacity:1}
+  #accessGate{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:20px;background:linear-gradient(135deg,rgba(7,16,27,.96),rgba(11,17,24,.94)),radial-gradient(circle at center,#284a5b,#0b1118)}
+  #accessForm{width:min(420px,100%);padding:30px;border:1px solid #62798d;border-radius:16px;background:#132231;box-shadow:0 20px 80px #0009}
+  #accessForm h1{margin:0 0 8px;color:#ffd166;font-size:clamp(23px,5vw,32px)}
+  #accessForm p{margin:0 0 20px;color:#d7e3ef;line-height:1.5}
+  #accessForm label{display:block;margin-bottom:7px;font-size:13px;font-weight:700;color:#d7e3ef}
+  #accessPassword{width:100%;padding:11px 12px;border:1px solid #536a7f;border-radius:8px;background:#1a2c3d;color:#fff;font:inherit}
+  #accessPassword:focus{outline:2px solid #ffd166;outline-offset:2px}
+  #accessSubmit{width:100%;margin-top:12px;padding:11px;border:0;border-radius:8px;background:#e9a93b;color:#1c1b16;font:inherit;font-weight:900;cursor:pointer}
+  #accessError{min-height:1.3em;margin:10px 0 0!important;color:#ff8181!important;font-size:13px}
+  #accessGate[hidden]{display:none}
+  @media(max-width:600px){#stats{font-size:12px}#adminPanel{top:8px;right:8px;max-height:calc(100vh - 78px)}.scroll{max-height:calc(100vh - 155px)}}
+</style>
+</head>
+<body>
+<div id="accessGate">
+  <form id="accessForm" autocomplete="off">
+    <h1>Citadel Guardians</h1>
+    <p>Enter the access password to begin.</p>
+    <label for="accessPassword">Password</label>
+    <input id="accessPassword" type="password" required autofocus autocomplete="current-password">
+    <button id="accessSubmit" type="submit">Enter</button>
+    <p id="accessError" role="status" aria-live="polite"></p>
+  </form>
+</div>
+<div id="game"></div>
+<div id="hud">
+  <div id="stats" class="panel"><strong>Citadel Guardians Admin Server</strong><br>Spawned: <span id="actorCount">0</span><br>Battle: <span id="battleState">Stopped</span><br>F: Admin panel · WASD: Move</div>
+  <section id="adminPanel" class="panel" aria-label="Admin summon panel">
+    <h2>Admin Controls</h2>
+    <div class="scroll">
+      <h3>Mob or Unit</h3>
+      <select id="actorSelect"></select>
+      <h3>Mutation</h3>
+      <select id="mutationSelect"></select>
+      <h3>Level</h3>
+      <select id="levelSelect"></select>
+      <button id="spawnButton" class="spawnButton" type="button">Summon in front</button>
+      <h3>Selected Unit</h3>
+      <button id="evolveButton" class="spawnButton" type="button">Evolve selected actor</button>
+      <button id="clearButton" class="spawnButton" type="button" style="background:#52677b;color:white">Clear battlefield</button>
+    </div>
+  </section>
+  <button id="panelToggle" type="button">Admin Panel</button>
+  <button id="battleButton" type="button">Start Battle</button>
+  <div id="message"></div>
+</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+
+document.title='Citadel Guardians Admin Server - 3D Battle Sandbox';
+const ACCESS_PASSWORD='Davilcorp.@@KK';
+let accessGranted=false;
+const accessForm=document.getElementById('accessForm'),accessPassword=document.getElementById('accessPassword'),accessError=document.getElementById('accessError');
+accessForm.addEventListener('submit',event=>{
+  event.preventDefault();
+  if(accessPassword.value===ACCESS_PASSWORD){
+    accessGranted=true;
+    document.getElementById('accessGate').hidden=true;
+    accessForm.reset();
+    return;
+  }
+  accessPassword.value='';
+  accessError.textContent='Incorrect password. Try again.';
+  accessPassword.focus();
+});
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9ac7d8);
+scene.fog=new THREE.Fog(0x9ac7d8,55,115);
+const camera=new THREE.PerspectiveCamera(64,innerWidth/innerHeight,.1,300);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.getElementById('game').appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xe5f6ff,0x42513a,2.1));
+const sun=new THREE.DirectionalLight(0xfff0d4,2.4);
+sun.position.set(-25,45,25);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-55;sun.shadow.camera.right=55;sun.shadow.camera.top=55;sun.shadow.camera.bottom=-55;scene.add(sun);
+const mat=(color,roughness=.85,metalness=0)=>new THREE.MeshStandardMaterial({color,roughness,metalness});
+const materials={
+  grass:mat(0x5b8c4a),grass2:mat(0x679653),stone:mat(0x9da9b0),darkStone:mat(0x485563),
+  wood:mat(0x68452e),gold:mat(0xf3c64e,.45,.35),skin:mat(0xffc89b),
+  blue:mat(0x3276d2),red:mat(0xc44845),black:mat(0x202934),white:mat(0xf1f4f7),
+  green:mat(0x6fe0a0),purple:mat(0x9b67e8),orange:mat(0xf08a3e),
+  zombie:mat(0xa6c98a),zombieDark:mat(0x39483e),zombieCloth:mat(0x53604f),
+  fire:mat(0xff5a24),ice:mat(0x8be8ff),electric:mat(0xe8e65b),stoneGolem:mat(0x777f89),ninja:mat(0x252b42)
+};
+function box(parent,x,y,z,sx,sy,sz,material){const mesh=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),material);mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
+function cylinder(parent,x,y,z,rt,rb,h,material,segments=8){const mesh=new THREE.Mesh(new THREE.CylinderGeometry(rt,rb,h,segments),material);mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
+function sphere(parent,x,y,z,sx,sy,sz,material){const mesh=new THREE.Mesh(new THREE.SphereGeometry(1,12,10),material);mesh.position.set(x,y,z);mesh.scale.set(sx,sy,sz);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
+function makeHumanoid({shirt=materials.blue,pants=materials.black,skin=materials.skin,scale=1,weapon=true,cape=false}={}){
+  const g=new THREE.Group();g.scale.setScalar(scale);
+  box(g,0,1.48,0,.72,.78,.38,shirt);
+  box(g,0,2.12,0,.52,.5,.48,skin);
+  box(g,0,2.4,0,.54,.13,.5,materials.black);
+  box(g,-.12,2.17,.245,.055,.06,.025,materials.black);box(g,.12,2.17,.245,.055,.06,.025,materials.black);
+  const leftArm=new THREE.Group();leftArm.position.set(-.42,1.82,0);g.add(leftArm);box(leftArm,0,-.34,0,.19,.7,.22,shirt);
+  const rightArm=new THREE.Group();rightArm.position.set(.42,1.82,0);g.add(rightArm);box(rightArm,0,-.34,0,.19,.7,.22,shirt);
+  if(weapon){box(rightArm,.13,-.12,0,.1,.72,.12,materials.darkStone);box(rightArm,.13,.23,0,.15,.1,.15,materials.gold);}
+  const leftLeg=new THREE.Group();leftLeg.position.set(-.2,1.08,0);g.add(leftLeg);box(leftLeg,0,-.34,0,.27,.68,.3,pants);box(leftLeg,0,-.69,.06,.3,.16,.42,materials.darkStone);
+  const rightLeg=new THREE.Group();rightLeg.position.set(.2,1.08,0);g.add(rightLeg);box(rightLeg,0,-.34,0,.27,.68,.3,pants);box(rightLeg,0,-.69,.06,.3,.16,.42,materials.darkStone);
+  if(cape){const c=box(g,0,1.48,-.27,.55,.72,.08,materials.red);c.rotation.x=-.1;}
+  g.userData.limbs={leftArm,rightArm,leftLeg,rightLeg};return g;
+}
+function makeHorse(parent,coat){
+  sphere(parent,0,.92,-.12,.66,.48,1.05,coat);
+  sphere(parent,0,1.35,.67,.3,.52,.34,coat);
+  sphere(parent,0,1.72,.92,.3,.36,.38,coat);
+  sphere(parent,0,1.93,1.05,.27,.12,.32,materials.black);
+  const legs=[];
+  for(const x of [-.42,.42])for(const z of [-.78,.52]){
+    const pivot=new THREE.Group();pivot.position.set(x,.81,z);parent.add(pivot);
+    const leg=box(pivot,0,-.39,0,.16,.78,.18,coat);leg.rotation.x=z>0?-.08:.08;legs.push(pivot);
+  }
+  const tail=box(parent,0,1.08,-1.12,.12,.62,.12,materials.black);tail.rotation.x=-.5;
+  parent.userData.legs=legs;
+}
+function makeMountedHumanoid(options,saddle=materials.red,spear=materials.gold){
+  const root=new THREE.Group(),horse=new THREE.Group();makeHorse(horse,saddle);root.add(horse);
+  const rider=makeHumanoid(options);rider.position.y=.62;root.add(rider);root.userData.limbs=rider.userData.limbs;root.userData.horse=horse;
+  const lance=cylinder(root,.57,2.25,.25,.045,.045,2.1,spear,6);lance.rotation.x=-Math.PI/2.5;return root;
+}
+function makeMechaUnit(type,color){
+  const armor=new THREE.MeshStandardMaterial({color,metalness:.72,roughness:.3}),glow=new THREE.MeshStandardMaterial({color:0x8beeff,emissive:0x286a83,emissiveIntensity:1.2,metalness:.35,roughness:.25});
+  if(type==='mechWolf'){
+    const wolf=new THREE.Group();
+    const wolfLegs=[];
+    box(wolf,0,1.08,-.08,1.15,.62,1.75,armor);
+    box(wolf,0,1.32,.93,.78,.62,.75,armor);
+    box(wolf,0,1.43,1.42,.68,.38,.48,armor);
+    for(const x of [-.3,.3]){box(wolf,x,1.48,1.68,.1,.1,.04,glow);const ear=new THREE.Mesh(new THREE.ConeGeometry(.15,.55,5),armor);ear.position.set(x,1.92,1.35);wolf.add(ear);}
+    for(const x of [-.43,.43])for(const z of [-.63,.58]){
+      const leg=box(wolf,x,.48,z,.24,.86,.27,armor);leg.rotation.x=z>0?-.12:.12;
+      wolfLegs.push(leg);
+      box(wolf,x,.14,z+.12,.34,.18,.46,materials.darkStone);
+    }
+    const tail=box(wolf,0,1.4,-1.12,.16,.18,.86,armor);tail.rotation.x=-.48;
+    for(const z of [-.35,.2])box(wolf,0,1.42,z,.28,.13,.14,glow,false);
+    wolf.userData.wolfLegs=wolfLegs;
+    return wolf;
+  }
+  const scale=type==='mechGolem'?1.25:1;
+  const unit=makeHumanoid({shirt:armor,pants:armor,skin:armor,scale,weapon:false,cape:false});
+  for(const x of [-.42,.42]){
+    const shoulder=new THREE.Mesh(new THREE.DodecahedronGeometry(.34,0),armor);shoulder.position.set(x,1.91,0);unit.add(shoulder);
+    const gauntlet=box(unit,x*.95,1.35,.02,.3,.34,.34,armor);gauntlet.rotation.z=x*.12;
+  }
+  box(unit,0,1.5,.23,.48,.2,.08,glow,false);
+  if(type==='mechKnight'||type==='fireKnight'||type==='electricKnight'){
+    const blade=cylinder(unit,.58,1.45,.05,.07,.07,1.65,type==='fireKnight'?materials.fire:type==='electricKnight'?materials.electric:materials.gold,6);blade.rotation.z=-.12;
+  }
+  if(type==='mechGolem'){
+    for(let i=0;i<6;i++){
+      const shard=new THREE.Mesh(new THREE.DodecahedronGeometry(.34+(i%2)*.1,0),armor);shard.position.set(i%2?-.48:.48,1.15+(i%3)*.52,i%3?-.17:.22);unit.add(shard);
+    }
+  }
+  return unit;
+}
+function makeArcher(){
+  const g=makeHumanoid({shirt:materials.green,pants:materials.black,weapon:false});
+  const bowGroup=new THREE.Group();bowGroup.position.set(-.58,1.58,.22);g.add(bowGroup);
+  const curve=new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0,-.58,0),new THREE.Vector3(.26,-.38,0),new THREE.Vector3(.37,0,0),
+    new THREE.Vector3(.26,.38,0),new THREE.Vector3(0,.58,0)
+  ]);
+  const bow=new THREE.Mesh(new THREE.TubeGeometry(curve,18,.045,6,false),materials.wood);bow.castShadow=true;bowGroup.add(bow);
+  const string=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,-.58,.015),new THREE.Vector3(0,.58,.015)]),new THREE.LineBasicMaterial({color:0xe6dcc4}));
+  bowGroup.add(string);
+  box(g,.28,1.68,-.3,.28,.62,.2,materials.wood);
+  for(let i=0;i<4;i++){
+    const shaft=cylinder(g,.18+i*.065,2.1,-.3,.018,.018,.72,materials.darkStone,5);shaft.rotation.z=.12;
+    const fletching=box(g,.18+i*.065,2.47,-.3,.07,.1,.07,materials.red);
+    fletching.rotation.z=.12;
+  }
+  return g;
+}
+const sceneGround=new THREE.Mesh(new THREE.PlaneGeometry(180,180),materials.grass);sceneGround.rotation.x=-Math.PI/2;sceneGround.receiveShadow=true;scene.add(sceneGround);
+for(let i=0;i<130;i++){
+  const x=(Math.random()-.5)*145,z=(Math.random()-.5)*145;if(Math.abs(x)<13&&Math.abs(z)<13)continue;
+  const tree=new THREE.Group();tree.position.set(x,0,z);cylinder(tree,0,.8,0,.22,.32,1.6,materials.wood,6);
+  const crown=new THREE.Mesh(new THREE.ConeGeometry(1.2,2.8,7),mat(i%2?0x2e7043:0x3b8149));crown.position.y=2.7;crown.castShadow=true;tree.add(crown);scene.add(tree);
+}
+for(let i=0;i<35;i++){const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(.3+Math.random()*.65,0),mat(0x697b6a));rock.position.set((Math.random()-.5)*130,.25,(Math.random()-.5)*130);rock.castShadow=true;scene.add(rock);}
+const CASTLE_HALF_X=7.6,CASTLE_HALF_Z=6.4;
+const gateSpawn=new THREE.Vector3(0,0,8.2);
+const actorDefs={
+  mobs:[
+    {id:'grunt',name:'Walker Zombie',hp:64,atk:8,def:0,speed:2.55,range:1.7,coin:14,color:materials.zombie,scale:.82},
+    {id:'brute',name:'Brute Zombie',hp:145,atk:12,def:3,speed:1.2,range:1.9,coin:22,color:materials.zombieDark,scale:1.15},
+    {id:'runner',name:'Runner Zombie',hp:48,atk:6,def:0,speed:3.75,range:1.5,coin:17,color:materials.zombie,scale:.78},
+    {id:'shaman',name:'Plague Caster',hp:84,atk:10,def:1,speed:1.75,range:5.8,coin:19,color:materials.zombieDark,scale:.9},
+    {id:'giantZombie',name:'Giant Zombie',hp:250,atk:18,def:5,speed:.9,range:2.3,coin:38,color:materials.zombieDark,scale:1.65},
+    {id:'fireZombie',name:'Fire Zombie',hp:105,atk:12,def:1,speed:2,range:2,coin:25,color:materials.fire,scale:.95},
+    {id:'iceZombie',name:'Ice Zombie',hp:125,atk:9,def:3,speed:1.55,range:2,coin:27,color:materials.ice,scale:1},
+    {id:'electricZombie',name:'Electric Zombie',hp:95,atk:11,def:0,speed:2.8,range:1.8,coin:28,color:materials.electric,scale:.9},
+    {id:'cavalryZombie',name:'Zombie Cavalry',hp:170,atk:14,def:2,speed:4.1,range:2.1,coin:34,color:materials.zombie,scale:1.05,mounted:true},
+    {id:'suicideZombie',name:'Bomber Zombie',hp:72,atk:110,def:0,speed:5.2,range:1.3,coin:24,color:materials.zombie,scale:.9,explosive:true},
+    {id:'easyReaper',name:'Verdant Reaper',hp:1120,atk:19,def:8,speed:.78,range:2.5,coin:250,color:materials.grass2,scale:2.2,boss:true,style:'verdant'},
+    {id:'mediumReaper',name:'Tempest Reaper',hp:1580,atk:28,def:6,speed:1.02,range:8,coin:300,color:materials.electric,scale:2.05,boss:true,style:'storm'},
+    {id:'hardReaper',name:'Cinder Reaper',hp:2200,atk:37,def:9,speed:1.12,range:3,coin:380,color:materials.fire,scale:2.3,boss:true,style:'inferno'},
+    {id:'hellReaper',name:'Eternal Reaper',hp:2900,atk:43,def:12,speed:1.2,range:8,coin:500,color:materials.purple,scale:2.25,boss:true,style:'lich'}
+  ],
+  units:[
+    {id:'guard',name:'Swordsman',hp:155,atk:27,def:7,speed:3.8,range:3.5,cool:.82,color:materials.blue},
+    {id:'archer',name:'Archer',hp:95,atk:24,def:1,speed:3.15,range:21,cool:1.05,color:materials.green},
+    {id:'mage',name:'Mage',hp:90,atk:42,def:1,speed:2.8,range:18,cool:1.75,color:materials.purple},
+    {id:'knight',name:'Knight',hp:235,atk:38,def:14,speed:2.35,range:3.8,cool:1.05,color:materials.red},
+    {id:'medic',name:'Medic',hp:90,atk:5,def:2,speed:2.3,range:7,cool:8.5,color:materials.white},
+    {id:'golem',name:'Golem',hp:520,atk:72,def:18,speed:1.05,range:3.8,cool:2.5,color:materials.stoneGolem},
+    {id:'ninja',name:'Ninja',hp:78,atk:22,def:1,speed:6.2,range:3.2,cool:.38,color:materials.ninja},
+    {id:'cavalry',name:'Cavalry',hp:235,atk:38,def:14,speed:5.1,range:3.8,cool:1.05,color:materials.red,mounted:true},
+    {id:'mechGolem',name:'Mecha Golem',hp:680,atk:90,def:22,speed:1.05,range:4,cool:2.1,color:0x687d8b},
+    {id:'mechWolf',name:'Mecha Wolf',hp:280,atk:45,def:9,speed:6.5,range:3.4,cool:.58,color:0x748c9a},
+    {id:'mechKnight',name:'Mecha Knight',hp:360,atk:54,def:18,speed:2.6,range:4,cool:.92,color:0x8897a5},
+    {id:'fireKnight',name:'Fire Knight',hp:320,atk:58,def:13,speed:3.1,range:4,cool:.82,color:0xff6938},
+    {id:'electricKnight',name:'Electric Knight',hp:300,atk:52,def:12,speed:3.4,range:4,cool:.78,color:0xf0dc52},
+    {id:'necromancer',name:'Necromancer',hp:210,atk:48,def:7,speed:2.7,range:4.5,cool:1.15,color:0x7d55a8}
+  ]
+};
+const mutations=[
+  {id:'none',name:'None',chance:0,color:0xffffff,hp:1,attack:1,def:0,accent:0xffffff},
+  {id:'gold',name:'Gold',chance:.01,color:0xffd447,hp:1.22,attack:1.18,def:2,accent:0xb67812},
+  {id:'diamond',name:'Diamond',chance:.0055,color:0x92efff,hp:1.4,attack:1.22,def:4,accent:0xe4fdff},
+  {id:'emerald',name:'Emerald',chance:.008,color:0x38e18b,hp:1.18,attack:1.28,def:2,accent:0x126342},
+  {id:'amethyst',name:'Amethyst',chance:.0065,color:0xc579ff,hp:1.2,attack:1.35,def:1,accent:0x6a2ca1},
+  {id:'radiation',name:'Radiation',chance:.0035,color:0x9dff38,hp:1.32,attack:1.42,def:3,accent:0x365d12},
+  {id:'dark',name:'Dark',chance:.0025,color:0x5d477e,hp:1.45,attack:1.4,def:5,accent:0x160e25},
+  {id:'angel',name:'Angel',chance:.0015,color:0xfff2ae,hp:1.5,attack:1.36,def:5,accent:0xffffff},
+  {id:'eternal',name:'Eternal',chance:.0004,color:0xff67dc,hp:2.1,attack:1.85,def:10,accent:0x7b2c9b}
+];
+const actorSelect=document.getElementById('actorSelect'),mutationSelect=document.getElementById('mutationSelect'),levelSelect=document.getElementById('levelSelect');
+function addOption(select,value,label,groupName){
+  let group=select.querySelector(`optgroup[label="${groupName}"]`);
+  if(!group){group=document.createElement('optgroup');group.label=groupName;select.appendChild(group);}
+  const option=document.createElement('option');option.value=value;option.textContent=label;group.appendChild(option);
+}
+for(const mob of actorDefs.mobs)addOption(actorSelect,mob.id,mob.name,'Mobs');
+for(const unit of actorDefs.units)addOption(actorSelect,unit.id,unit.name,'Units');
+for(const mutation of mutations){const option=document.createElement('option');option.value=mutation.id;option.textContent=mutation.name;mutationSelect.appendChild(option);}
+for(const level of [1,2,3,4,5,'evolve']){const option=document.createElement('option');option.value=level;option.textContent=level==='evolve'?'Evolve':`Level ${level}`;levelSelect.appendChild(option);}
+const player=makeHumanoid({shirt:materials.blue,pants:materials.black,weapon:true,cape:true});player.position.set(0,0,14);scene.add(player);
+const actors=[],keys={};let panelOpen=false,battleActive=false,selectedAlly=null,playerHp=160,playerMaxHp=160,playerAttack=28,playerCooldown=0,elapsed=0,cameraYaw=0,cameraPitch=.28,cameraDistance=13,walkPhase=0,lastTime=0;
+const message=document.getElementById('message');
+function notify(text){message.textContent=text;message.classList.add('show');clearTimeout(notify.timer);notify.timer=setTimeout(()=>message.classList.remove('show'),2100);}
+function makeTag(text,color){
+  const canvas=document.createElement('canvas');canvas.width=768;canvas.height=112;const ctx=canvas.getContext('2d');ctx.clearRect(0,0,768,112);
+  ctx.font='bold 40px system-ui, sans-serif';const label=text.length>28?text.slice(0,27)+'…':text,width=Math.min(744,Math.max(180,ctx.measureText(label).width+44)),left=(768-width)/2;
+  ctx.fillStyle='rgba(12,18,26,.88)';ctx.strokeStyle=`#${color.toString(16).padStart(6,'0')}`;ctx.lineWidth=5;ctx.beginPath();ctx.roundRect(left,14,width,84,20);ctx.fill();ctx.stroke();
+  ctx.fillStyle=`#${color.toString(16).padStart(6,'0')}`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,384,57);
+  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),transparent:true,depthWrite:false}));sprite.scale.set(Math.max(2.4,width/112),.35,1);return sprite;
+}
+function makeHealthBar(){
+  const group=new THREE.Group(),bg=new THREE.Mesh(new THREE.PlaneGeometry(1.35,.14),mat(0x321f28)),fg=new THREE.Mesh(new THREE.PlaneGeometry(1.29,.085),mat(0x53df71));
+  fg.position.z=.01;group.add(bg,fg);group.userData.fg=fg;return group;
+}
+function updateHealthBar(actor){actor.bar.userData.fg.scale.x=Math.max(.001,actor.hp/actor.maxHp);actor.bar.userData.fg.position.x=-(1.29*(1-actor.hp/actor.maxHp))/2;}
+function decorateMutation(mesh,mutation){
+  if(!mutation||mutation.id==='none')return;
+  const color=new THREE.Color(mutation.color),aura=new THREE.Group();
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(1.05,.055,6,24),new THREE.MeshBasicMaterial({color:mutation.color,transparent:true,opacity:.9}));
+  ring.rotation.x=Math.PI/2;ring.position.y=.12;aura.add(ring);
+  const halo=new THREE.Mesh(new THREE.TorusGeometry(.48,.07,6,18),new THREE.MeshStandardMaterial({color:mutation.accent,emissive:mutation.color,emissiveIntensity:1.2,metalness:.3,roughness:.3}));
+  halo.position.y=2.85;halo.rotation.x=Math.PI/2;aura.add(halo);
+  if(mutation.id==='angel'||mutation.id==='eternal'){
+    for(const side of [-1,1]){
+      const wing=new THREE.Mesh(new THREE.ConeGeometry(.42,1.35,5),new THREE.MeshStandardMaterial({color:mutation.accent,emissive:mutation.color,emissiveIntensity:.7}));
+      wing.position.set(side*.68,1.65,-.28);wing.rotation.z=side*.8;aura.add(wing);
+    }
+  }else if(mutation.id==='diamond'||mutation.id==='amethyst'||mutation.id==='emerald'){
+    for(let i=0;i<4;i++){
+      const shard=new THREE.Mesh(new THREE.OctahedronGeometry(.2),new THREE.MeshStandardMaterial({color:mutation.color,emissive:mutation.color,emissiveIntensity:.55,metalness:.25,roughness:.25}));
+      const angle=i*Math.PI/2;shard.position.set(Math.cos(angle)*.55,1.25+(i%2)*.55,Math.sin(angle)*.42);aura.add(shard);
+    }
+  }else if(mutation.id==='radiation'){
+    for(const side of [-1,1]){
+      const spike=new THREE.Mesh(new THREE.ConeGeometry(.16,.62,5),new THREE.MeshBasicMaterial({color:mutation.color}));
+      spike.position.set(side*.43,2.52,0);spike.rotation.z=side*.28;aura.add(spike);
+    }
+  }else{
+    const crown=new THREE.Mesh(new THREE.ConeGeometry(.48,.48,6),new THREE.MeshStandardMaterial({color:mutation.accent,emissive:mutation.color,emissiveIntensity:.6,metalness:.35}));
+    crown.position.y=2.75;aura.add(crown);
+  }
+  mesh.add(aura);
+  mesh.traverse(object=>{
+    if(!object.isMesh||!object.material||!object.material.color)return;
+    if(object.parent===aura)return;
+    const material=object.material.clone();material.color.lerp(color,.26);
+    if(material.emissive){material.emissive.setHex(mutation.color);material.emissiveIntensity=Math.max(material.emissiveIntensity||0,.18);}
+    object.material=material;
+  });
+  mesh.userData.mutationAura=aura;
+}
+function makeReaper(style,scale){
+  const form=new THREE.Group();form.scale.setScalar(scale);
+  const trimColor=style==='verdant'?0x71d879:style==='storm'?0xf0eb76:style==='inferno'?0xff6338:0xb978ed;
+  const robe=new THREE.MeshStandardMaterial({color:0x17141f,roughness:.72});
+  const trim=new THREE.MeshStandardMaterial({color:trimColor,emissive:trimColor,emissiveIntensity:.75,metalness:.3,roughness:.35});
+  const hood=new THREE.Mesh(new THREE.SphereGeometry(.67,12,10),robe);hood.position.set(0,2.38,0);form.add(hood);
+  const cowl=new THREE.Mesh(new THREE.ConeGeometry(.92,1.05,9),robe);cowl.position.set(0,2.42,-.22);cowl.rotation.x=-.18;form.add(cowl);
+  const skull=new THREE.Mesh(new THREE.SphereGeometry(.43,12,10),new THREE.MeshStandardMaterial({color:0xc9c4b8,roughness:.86}));skull.position.set(0,2.35,.34);skull.scale.set(.86,1.05,.72);form.add(skull);
+  const jaw=new THREE.Mesh(new THREE.BoxGeometry(.48,.22,.34),new THREE.MeshStandardMaterial({color:0xaaa497}));jaw.position.set(0,2.05,.44);form.add(jaw);
+  for(const x of [-.17,.17]){const eye=new THREE.Mesh(new THREE.SphereGeometry(.075,8,6),new THREE.MeshBasicMaterial({color:trimColor}));eye.position.set(x,2.4,.62);form.add(eye);}
+  const cloak=new THREE.Mesh(new THREE.ConeGeometry(1.18,2.85,9),robe);cloak.position.set(0,1.04,-.12);cloak.rotation.x=Math.PI;form.add(cloak);
+  const collar=new THREE.Mesh(new THREE.TorusGeometry(.62,.13,7,18),trim);collar.position.set(0,1.95,.02);collar.rotation.x=Math.PI/2;form.add(collar);
+  for(const side of [-1,1]){const sleeve=new THREE.Mesh(new THREE.ConeGeometry(.25,1.15,7),robe);sleeve.position.set(side*.63,1.55,.14);sleeve.rotation.z=side*.42;form.add(sleeve);}
+  const staff=cylinder(form,.68,1.56,.18,.075,.075,2.65,materials.darkStone,8);staff.rotation.z=-.1;
+  const bladeCurve=new THREE.CatmullRomCurve3([
+    new THREE.Vector3(.62,2.74,.18),new THREE.Vector3(.92,3.04,.18),
+    new THREE.Vector3(1.42,3.12,.18),new THREE.Vector3(1.82,2.94,.18),
+    new THREE.Vector3(1.51,2.9,.18)
+  ]);
+  form.add(new THREE.Mesh(new THREE.TubeGeometry(bladeCurve,24,.11,8,false),new THREE.MeshStandardMaterial({color:0xd9e1e8,metalness:.8,roughness:.22,emissive:trimColor,emissiveIntensity:.28})));
+  const bladeTip=new THREE.Mesh(new THREE.ConeGeometry(.12,.48,6),new THREE.MeshStandardMaterial({color:0xd9e1e8,metalness:.8,roughness:.22,emissive:trimColor,emissiveIntensity:.28}));bladeTip.position.set(1.78,2.98,.18);bladeTip.rotation.z=-Math.PI/2;form.add(bladeTip);
+  if(style==='verdant'){
+    for(const side of [-1,1]){const thorn=new THREE.Mesh(new THREE.ConeGeometry(.15,.55,5),trim);thorn.position.set(side*.57,2.85,-.16);thorn.rotation.z=-side*.36;form.add(thorn);}
+  }else if(style==='storm'){
+    for(const side of [-1,1]){const arc=new THREE.Mesh(new THREE.TorusGeometry(.8,.045,5,20),trim);arc.position.set(side*.62,1.55,-.15);arc.rotation.y=side*.55;form.add(arc);}
+  }else if(style==='inferno'){
+    const flame=new THREE.Mesh(new THREE.ConeGeometry(.3,.95,6),new THREE.MeshBasicMaterial({color:trimColor}));flame.position.set(0,3.14,-.12);form.add(flame);
+  }else{
+    const halo=new THREE.Mesh(new THREE.TorusGeometry(.87,.1,8,24),trim);halo.position.set(0,3.05,-.2);halo.rotation.x=Math.PI/2;form.add(halo);
+  }
+  if(style==='storm')addEnemyAura(form,'electricZombie');
+  if(style==='inferno')addEnemyAura(form,'fireZombie');
+  return form;
+}
+function makeMob(def){
+  if(def.boss)return makeReaper(def.style,def.scale);
+  if(def.mounted)return makeMountedHumanoid({shirt:materials.zombieCloth,pants:materials.zombieCloth,skin:materials.zombie,scale:.82,weapon:false},materials.zombieDark,materials.zombieDark);
+  const mob=makeHumanoid({shirt:materials.zombieCloth,pants:materials.zombieCloth,skin:materials.zombie,scale:def.scale,weapon:true,cape:false});
+  box(mob,-.22,1.52,.205,.08,.28,.025,materials.zombieDark);
+  box(mob,.16,1.38,.205,.07,.2,.025,materials.black);
+  sphere(mob,-.12,2.18,.255,.045,.045,.025,materials.red);
+  if(mob.userData.limbs){mob.userData.limbs.leftArm.rotation.z=.12;mob.userData.limbs.rightArm.rotation.z=-.16;}
+  if(def.id==='runner'||def.id==='suicideZombie')mob.rotation.x=.12;
+  if(def.id==='brute')for(const side of [-1,1])box(mob,side*.32,2.38,0,.12,.35,.12,materials.gold);
+  if(def.id==='shaman'){
+    const hood=new THREE.Mesh(new THREE.ConeGeometry(.38,.48,7),materials.zombieDark);hood.position.y=2.52;mob.add(hood);
+    const staff=cylinder(mob,-.62,1.2,0,.055,.055,2.5,materials.wood,6);staff.rotation.z=.08;
+    sphere(mob,-.62,2.48,0,.16,.16,.16,materials.purple);
+  }
+  if(def.id==='suicideZombie'){
+    sphere(mob,0,1.25,-.28,.43,.3,.3,materials.black);sphere(mob,0,1.25,-.55,.18,.18,.12,materials.fire);
+    const fuse=cylinder(mob,0,1.62,-.52,.035,.035,.32,materials.gold,5);fuse.rotation.x=.3;
+  }
+  if(['fireZombie','iceZombie','electricZombie'].includes(def.id))addEnemyAura(mob,def.id);
+  return mob;
+}
+function makeUnit(def){
+  if(def.mounted)return makeMountedHumanoid({shirt:materials.red,pants:materials.darkStone,scale:.9},materials.red,materials.gold);
+  if(def.id==='archer')return makeArcher();
+  if(def.id.startsWith('mech')||def.id.endsWith('Knight'))return makeMechaUnit(def.id,typeof def.color==='number'?def.color:def.color.color.getHex());
+  if(def.id==='necromancer'){
+    const unit=makeHumanoid({shirt:materials.purple,pants:materials.black,weapon:false,cape:true});
+    cylinder(unit,.58,1.35,.05,.065,.065,2.1,materials.darkStone,8);
+    const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(.58,2.32,.05),new THREE.Vector3(.88,2.65,.05),new THREE.Vector3(1.22,2.72,.05),new THREE.Vector3(1.14,2.44,.05)]);
+    unit.add(new THREE.Mesh(new THREE.TubeGeometry(curve,14,.075,6,false),mat(0xc8d1d9)));return unit;
+  }
+  const color=typeof def.color==='number'?mat(def.color,.32,.7):def.color;
+  const unit=makeHumanoid({shirt:['golem'].includes(def.id)?materials.stoneGolem:color,pants:def.id==='golem'?materials.stoneGolem:materials.black,skin:def.id==='golem'?materials.stoneGolem:materials.skin,weapon:['guard','knight'].includes(def.id),cape:def.id==='knight'});
+  if(def.id==='medic'){box(unit,0,1.52,.23,.13,.43,.045,materials.green);box(unit,0,1.52,.25,.38,.13,.05,materials.green);}
+  if(def.id==='mage'){const hat=new THREE.Mesh(new THREE.ConeGeometry(.38,.72,8),materials.purple);hat.position.y=2.68;unit.add(hat);cylinder(unit,.55,1.25,0,.045,.045,2.5,materials.gold,6);}
+  if(def.id==='ninja'){box(unit,0,2.12,.255,.53,.2,.08,materials.black);box(unit,.08,2.15,.301,.22,.035,.02,materials.white);box(unit,0,2.42,-.22,.58,.22,.18,materials.ninja);}
+  return unit;
+}
+function makeEvolvedForm(actor){
+  if(!actor.isUnit){
+    const form=makeMob(actor.def),glow=new THREE.MeshStandardMaterial({color:0xffdf7a,emissive:0xffb52e,emissiveIntensity:.42,metalness:.22,roughness:.36});
+    const crest=new THREE.Mesh(new THREE.ConeGeometry(.38,.62,6),glow);crest.position.set(0,2.72,0);form.add(crest);
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(.92,.045,6,24),glow);ring.rotation.x=Math.PI/2;ring.position.y=.12;form.add(ring);
+    if(actor.mutation)decorateMutation(form,actor.mutation);
+    return form;
+  }
+  const ally={type:actor.def.id,mutation:actor.mutation};
+  const palettes={
+    guard:0x62c5ff,archer:0x65dc91,mage:0xb878ff,knight:0xe5bd66,medic:0xf4fff8,
+    golem:0x9ca8b7,ninja:0x8177c9,cavalry:0xd9a94c,mechGolem:0x57e6d3,mechWolf:0x70d7f0,
+    mechKnight:0x9fc8ff,fireKnight:0xff8050,electricKnight:0xffff73,necromancer:0xb980ff,
+    necromancerThrall:0x9bab91
+  };
+  const color=palettes[ally.type]||ally.mutation?.color||0xffdf7a;
+  const armor=new THREE.MeshStandardMaterial({color,emissive:color,emissiveIntensity:.24,metalness:.42,roughness:.36});
+  const form=ally.type==='cavalry'
+    ?makeMountedHumanoid({shirt:armor,pants:materials.darkStone,skin:materials.skin,scale:1.05,weapon:false,cape:true},armor,color)
+    :['mechGolem','mechWolf','mechKnight','fireKnight','electricKnight'].includes(ally.type)
+    ?makeMechaUnit(ally.type,color)
+    :makeHumanoid({shirt:armor,pants:ally.type==='golem'?armor:materials.darkStone,skin:ally.type==='golem'?armor:materials.skin,scale:ally.type==='golem'?1.42:1.12,weapon:false,cape:['knight','necromancer','necromancerThrall'].includes(ally.type)});
+  if(ally.type==='guard'){
+    const shield=box(form,-.62,1.38,.2,.16,.9,.72,armor);shield.rotation.z=.12;
+    box(form,-.72,1.38,.57,.07,.42,.04,materials.gold);
+    box(form,.58,1.5,.08,.08,1.45,.09,materials.gold);
+    const blade=new THREE.Mesh(new THREE.ConeGeometry(.11,.38,5),materials.gold);blade.position.set(.58,2.28,.08);form.add(blade);
+    const crest=new THREE.Mesh(new THREE.ConeGeometry(.28,.65,5),armor);crest.position.set(0,2.77,-.08);crest.rotation.z=.18;form.add(crest);
+  }else if(ally.type==='archer'){
+    const bowGroup=new THREE.Group();bowGroup.position.set(-.58,1.58,.22);form.add(bowGroup);
+    const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(0,-.58,0),new THREE.Vector3(.26,-.38,0),new THREE.Vector3(.37,0,0),new THREE.Vector3(.26,.38,0),new THREE.Vector3(0,.58,0)]);
+    bowGroup.add(new THREE.Mesh(new THREE.TubeGeometry(curve,18,.045,6,false),materials.wood));
+    bowGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,-.58,.015),new THREE.Vector3(0,.58,.015)]),new THREE.LineBasicMaterial({color:0xe6dcc4})));
+    box(form,.28,1.68,-.3,.28,.62,.2,materials.wood);
+    for(let i=0;i<4;i++){const shaft=cylinder(form,.18+i*.065,2.1,-.3,.018,.018,.72,materials.darkStone,5);shaft.rotation.z=.12;box(form,.18+i*.065,2.47,-.3,.07,.1,.07,materials.red);}
+    const hood=new THREE.Mesh(new THREE.ConeGeometry(.42,.58,7),armor);hood.position.y=2.58;form.add(hood);
+  }else if(ally.type==='mage'){
+    const hat=new THREE.Mesh(new THREE.ConeGeometry(.48,.92,8),armor);hat.position.y=2.76;form.add(hat);
+    cylinder(form,0,2.4,0,.48,.48,.1,armor,12);cylinder(form,.62,1.3,0,.065,.065,2.7,materials.darkStone,7);
+    const orb=new THREE.Mesh(new THREE.IcosahedronGeometry(.28,1),new THREE.MeshStandardMaterial({color:0xe7c9ff,emissive:0x9b67e8,emissiveIntensity:1.4}));orb.position.set(.62,2.8,0);form.add(orb);
+    for(let i=0;i<3;i++){const rune=new THREE.Mesh(new THREE.OctahedronGeometry(.15),armor),angle=i*Math.PI*2/3;rune.position.set(Math.cos(angle)*.72,1.75,Math.sin(angle)*.4);form.add(rune);}
+  }else if(ally.type==='knight'){
+    for(const side of [-1,1]){const shoulder=new THREE.Mesh(new THREE.DodecahedronGeometry(.42,0),armor);shoulder.position.set(side*.52,1.99,0);form.add(shoulder);box(form,side*.18,1.08,.04,.3,.2,.36,armor);}
+    const shield=box(form,-.64,1.42,.13,.14,.95,.72,armor);shield.rotation.z=-.08;
+    box(form,-.72,1.42,.51,.07,.54,.035,materials.gold);box(form,-.72,1.42,.52,.07,.54,.035,materials.gold).rotation.z=Math.PI/2;
+    const sword=cylinder(form,.66,1.48,.06,.085,.085,1.85,materials.gold,7);sword.rotation.z=-.12;
+    const crest=new THREE.Mesh(new THREE.ConeGeometry(.25,.55,5),armor);crest.position.set(0,2.73,-.08);form.add(crest);
+  }else if(ally.type==='medic'){
+    box(form,0,1.55,.23,.17,.62,.06,materials.green);box(form,0,1.55,.24,.54,.17,.06,materials.green);
+    cylinder(form,.62,1.3,0,.045,.045,2.5,materials.white,7);
+    const light=new THREE.Mesh(new THREE.SphereGeometry(.24,10,8),new THREE.MeshStandardMaterial({color:0x71ff9f,emissive:0x28dd72,emissiveIntensity:1.5}));light.position.set(.62,2.65,0);form.add(light);
+    const halo=new THREE.Mesh(new THREE.TorusGeometry(.48,.06,6,20),materials.gold);halo.position.y=2.95;halo.rotation.x=Math.PI/2;form.add(halo);
+  }else if(ally.type==='golem'){
+    for(const [x,y,z,size] of [[-.42,1.95,.05,.48],[.42,1.95,.05,.48],[-.3,1.25,0,.38],[.3,1.25,0,.38],[0,2.3,-.08,.4]]){const plate=new THREE.Mesh(new THREE.DodecahedronGeometry(size,0),armor);plate.position.set(x,y,z);form.add(plate);}
+    const core=new THREE.Mesh(new THREE.OctahedronGeometry(.3),new THREE.MeshStandardMaterial({color:0xd7f7ff,emissive:color,emissiveIntensity:1.7}));core.position.set(0,1.72,.34);form.add(core);
+    for(const side of [-1,1]){const spike=new THREE.Mesh(new THREE.ConeGeometry(.16,.78,5),armor);spike.position.set(side*.44,2.57,0);spike.rotation.z=side*.2;form.add(spike);}
+  }else if(ally.type==='ninja'){
+    box(form,0,2.12,.255,.55,.2,.08,materials.black);box(form,.08,2.15,.301,.24,.04,.025,materials.white);
+    const hood=new THREE.Mesh(new THREE.SphereGeometry(.34,10,8),armor);hood.position.set(0,2.38,-.16);form.add(hood);
+    for(const side of [-1,1]){const blade=cylinder(form,side*.68,1.45,.04,.045,.045,1.45,armor,5);blade.rotation.z=side*.28;}
+    const scarf=box(form,0,1.75,-.4,.75,.14,.1,armor);scarf.rotation.z=-.2;
+  }else if(ally.type==='cavalry'){
+    const lance=cylinder(form,.62,2.75,.2,.055,.055,2.8,materials.gold,6);lance.rotation.x=-Math.PI/2.6;
+    const plume=new THREE.Mesh(new THREE.ConeGeometry(.16,.62,6),materials.red);plume.position.set(0,2.88,-.08);form.add(plume);
+  }else if(ally.type==='necromancer'||ally.type==='necromancerThrall'){
+    const hood=new THREE.Mesh(new THREE.ConeGeometry(.44,.62,7),materials.black);hood.position.y=2.58;form.add(hood);
+    cylinder(form,.68,1.5,.04,.065,.065,2.35,materials.darkStone,7);
+    const bladeCurve=new THREE.CatmullRomCurve3([new THREE.Vector3(.65,2.38,.04),new THREE.Vector3(.95,2.72,.04),new THREE.Vector3(1.35,2.82,.04),new THREE.Vector3(1.23,2.48,.04)]);
+    form.add(new THREE.Mesh(new THREE.TubeGeometry(bladeCurve,16,.09,7,false),armor));
+    const soul=new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),new THREE.MeshStandardMaterial({color:0xdcc0ff,emissive:0x8844bb,emissiveIntensity:1.4}));soul.position.set(0,1.55,.26);form.add(soul);
+  }else if(ally.type==='mechGolem'){
+    for(const side of [-1,1]){const shoulder=new THREE.Mesh(new THREE.DodecahedronGeometry(.5,0),armor);shoulder.position.set(side*.65,2.05,0);form.add(shoulder);}
+    const reactor=new THREE.Mesh(new THREE.OctahedronGeometry(.43),new THREE.MeshStandardMaterial({color:0xe8ffff,emissive:color,emissiveIntensity:2}));reactor.position.set(0,1.55,.34);form.add(reactor);
+  }else if(ally.type==='mechWolf'){
+    for(const side of [-1,1]){const fin=new THREE.Mesh(new THREE.ConeGeometry(.18,.75,5),armor);fin.position.set(side*.43,1.82,-.5);fin.rotation.z=side*.35;form.add(fin);}
+    for(let i=0;i<3;i++){const light=new THREE.Mesh(new THREE.SphereGeometry(.12,8,6),new THREE.MeshBasicMaterial({color:0x9cfaff}));light.position.set(0,1.42,-.45-i*.35);form.add(light);}
+  }else if(['mechKnight','fireKnight','electricKnight'].includes(ally.type)){
+    const crest=new THREE.Mesh(new THREE.ConeGeometry(.25,.82,5),armor);crest.position.y=2.55;form.add(crest);
+    const blade=cylinder(form,.62,1.5,.04,.085,.085,1.95,armor,7);blade.rotation.z=-.12;
+    if(ally.type==='fireKnight')addEnemyAura(form,'fireZombie');
+    if(ally.type==='electricKnight')addEnemyAura(form,'electricZombie');
+  }
+  if(ally.mutation)decorateMutation(form,ally.mutation);
+  return form;
+}
+function spawnActor(){
+  const def=[...actorDefs.mobs,...actorDefs.units].find(item=>item.id===actorSelect.value);
+  if(!def)return;
+  const mutation=mutations.find(item=>item.id===mutationSelect.value)||mutations[0],isUnit=actorDefs.units.includes(def);
+  const levelChoice=isUnit?levelSelect.value:'1',evolved=isUnit&&levelChoice==='evolve',level=evolved?5:Number(levelChoice);
+  const mesh=def.boss?makeReaper(def.style,def.scale):isUnit?makeUnit(def):makeMob(def);
+  const facing=new THREE.Vector3(Math.sin(cameraYaw),0,Math.cos(cameraYaw)),right=new THREE.Vector3(-facing.z,0,facing.x);
+  const teamCount=actors.filter(actor=>!actor.dead&&actor.isUnit===isUnit).length,column=(teamCount%5)-2,row=Math.floor(teamCount/5);
+  const forwardDistance=isUnit?5.5:20;
+  const placement=player.position.clone().addScaledVector(facing,forwardDistance+row*2.7).addScaledVector(right,column*2.5);
+  placement.x=THREE.MathUtils.clamp(placement.x,-76,76);placement.z=THREE.MathUtils.clamp(placement.z,-76,76);
+  mesh.position.copy(placement);mesh.rotation.y=Math.atan2(-facing.x,-facing.z);
+  const mutationData=mutation.id==='none'?null:mutation;
+  const multiplier=mutationData;
+  let maxHp=def.hp*(multiplier?multiplier.hp:1),attack=def.atk*(multiplier?multiplier.attack:1),defense=def.def+(multiplier?multiplier.def:0);
+  if(evolved){maxHp*=1.5;attack*=1.5;defense+=4;}
+  else{const factor=1+.2*(level-1);maxHp*=factor;attack*=factor;defense+=level-1;}
+  scene.add(mesh);decorateMutation(mesh,mutationData);
+  const color=mutationData?mutationData.color:def.boss?0xff7373:0xeaf3fa;
+  const label=makeTag(`${mutationData?mutationData.name+' ':''}${def.name}${evolved?' · Evolved':level>1?' · Lv '+level:''}`,color);scene.add(label);
+  const bar=makeHealthBar();scene.add(bar);
+  const actor={def,mesh,mutation:mutationData,hp:maxHp,maxHp,attack,defense,speed:def.speed,range:def.range,cooldown:def.cool||1,attackTimer:Math.random(),bar,label,isUnit,level,evolved,dead:false};
+  if(evolved){const old=actor.mesh;actor.mesh=makeEvolvedForm(actor);actor.mesh.position.copy(placement);actor.mesh.rotation.y=Math.atan2(-facing.x,-facing.z);scene.remove(old);scene.add(actor.mesh);}
+  if(def.id==='fireZombie'||def.id==='fireKnight')actor.burnDamage=0;
+  actors.push(actor);selectedAlly=actor;updateSelection();updateHUD();
+  notify(`${mutationData?mutationData.name+' ':''}${def.name} summoned ${evolved?'at Evolve level':'at level '+level}.`);
+}
+function updateHUD(){document.getElementById('actorCount').textContent=actors.filter(actor=>!actor.dead).length;document.getElementById('battleState').textContent=battleActive?'Running':'Stopped';}
+function updateSelection(){
+  const selectedDef=[...actorDefs.mobs,...actorDefs.units].find(item=>item.id===actorSelect.value);
+  levelSelect.disabled=!selectedDef||!actorDefs.units.includes(selectedDef);
+  document.getElementById('evolveButton').disabled=!selectedAlly||!selectedAlly.isUnit||selectedAlly.evolved;
+  document.getElementById('evolveButton').textContent=selectedAlly?.evolved?'Selected actor evolved':'Evolve selected actor';
+}
+function updatePositionTags(){
+  for(const actor of actors){
+    if(actor.dead)continue;
+    const height=actor.def.boss?actor.def.scale*3.1:actor.mesh.userData.horse?4.1:3.1;
+    actor.bar.position.set(actor.mesh.position.x,actor.mesh.position.y+height,actor.mesh.position.z);actor.bar.lookAt(camera.position);
+    actor.label.position.set(actor.mesh.position.x,actor.mesh.position.y+height+.48,actor.mesh.position.z);updateHealthBar(actor);
+  }
+}
+function damage(actor,amount){actor.hp=Math.max(0,actor.hp-Math.max(1,amount-actor.defense));if(actor.hp<=0)actor.dead=true;}
+function playAttack(actor,target){
+  actor.mesh.userData.attackSwing=1;
+  const a=actor.def,b=target.def;
+  if(a.id==='medic'){
+    const allies=actors.filter(item=>item.isUnit&&!item.dead&&item.hp<item.maxHp&&item.mesh.position.distanceTo(actor.mesh.position)<7);
+    if(allies.length){const healed=allies.sort((x,y)=>x.hp/x.maxHp-y.hp/y.maxHp)[0];healed.hp=Math.min(healed.maxHp,healed.hp+12);return;}
+  }
+  damage(target,actor.attack);
+  if(a.id==='archer'||a.id==='mage')createProjectile(actor.mesh.position,target.mesh.position,a.id==='archer'?0x91f2aa:0xb78cff,a.id==='archer');
+  else createSlash(actor.mesh,target.mesh.position,actor.mutation?.color||0xffdf7a);
+  if(a.id==='fireKnight')for(const enemy of actors)if(!enemy.isUnit&&!enemy.dead&&enemy!==target&&enemy.mesh.position.distanceTo(target.mesh.position)<3.2)damage(enemy,actor.attack*.45);
+  if(a.id==='electricKnight')for(const enemy of actors)if(!enemy.isUnit&&!enemy.dead&&enemy!==target&&enemy.mesh.position.distanceTo(target.mesh.position)<4)damage(enemy,actor.attack*.35);
+}
+function findTarget(actor){
+  let best=null,dist=Infinity;
+  for(const other of actors){
+    if(other===actor||other.dead||other.isUnit===actor.isUnit)continue;
+    const d=actor.mesh.position.distanceTo(other.mesh.position);
+    if(d<dist){best=other;dist=d;}
+  }
+    return best;
+  }
+  function combatRange(actor){
+    if(actor.range>7)return actor.def.id==='archer'?9:8;
+    return actor.range;
+  }
+  function animateActor(actor,dt,moving){
+    const mesh=actor.mesh,limbs=mesh.userData.limbs;
+    mesh.userData.walkPhase=(mesh.userData.walkPhase||0)+(moving?dt*8:0);
+    const phase=mesh.userData.walkPhase,swing=moving?Math.sin(phase)*.58:0,attack=mesh.userData.attackSwing||0;
+    mesh.userData.attackSwing=Math.max(0,attack-dt*3.8);
+    if(limbs){
+      limbs.leftArm.rotation.x=swing;limbs.rightArm.rotation.x=-swing-Math.sin((1-attack)*Math.PI)*1.25;
+      limbs.rightArm.rotation.z=attack>0?-.3:0;limbs.leftLeg.rotation.x=-swing;limbs.rightLeg.rotation.x=swing;
+    }
+    if(mesh.userData.horse){
+      const horse=mesh.userData.horse,legs=horse.userData.legs||[];
+      horse.position.y=moving?Math.abs(Math.sin(phase*2))*.08:0;
+      legs.forEach((leg,index)=>{leg.rotation.x=moving?Math.sin(phase+(index%2)*Math.PI)*.52:0;});
+    }
+    if(mesh.userData.wolfLegs)mesh.userData.wolfLegs.forEach((leg,index)=>{leg.rotation.x=moving?Math.sin(phase+(index%2)*Math.PI)*.38:0;});
+    if(mesh.userData.mutationAura)mesh.userData.mutationAura.rotation.y+=dt*(moving?1.8:.7);
+    if(mesh.userData.aura?.group)mesh.userData.aura.group.rotation.y+=dt*(moving?1.8:.7);
+  }
+function createSlash(source,target,color){
+  const points=[source.position.clone().add(new THREE.Vector3(0,1.3,0)),target.clone().add(new THREE.Vector3(0,1,0))];
+  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color,transparent:true,opacity:.9}));
+  scene.add(line);setTimeout(()=>{scene.remove(line);line.geometry.dispose();line.material.dispose();},180);
+}
+function createProjectile(from,to,color,arrow=false){
+  const group=new THREE.Group();
+  if(arrow){const shaft=cylinder(group,0,0,0,.035,.035,.8,materials.wood,6);shaft.rotation.x=Math.PI/2;}
+  else group.add(new THREE.Mesh(new THREE.SphereGeometry(.2,10,8),new THREE.MeshBasicMaterial({color})));
+  const start=from.clone().add(new THREE.Vector3(0,1.6,0)),end=to.clone().add(new THREE.Vector3(0,1,0));
+  group.position.copy(start);group.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),end.clone().sub(start).normalize());scene.add(group);
+  const begin=performance.now(),duration=360;
+  function animate(){const t=Math.min(1,(performance.now()-begin)/duration);group.position.lerpVectors(start,end,t);if(t<1)requestAnimationFrame(animate);else{scene.remove(group);group.traverse(object=>{if(object.geometry)object.geometry.dispose();});}}
+  requestAnimationFrame(animate);
+}
+function updateBattle(dt){
+  playerCooldown=Math.max(0,playerCooldown-dt);
+  if(playerHp<playerMaxHp)playerHp=Math.min(playerMaxHp,playerHp+dt);
+  for(const actor of actors){
+    if(actor.dead)continue;
+    actor.attackTimer-=dt;
+    if(actor.isUnit&&actor.def.id==='medic'){
+      const wounded=actors.filter(item=>item.isUnit&&!item.dead&&item.hp<item.maxHp&&item.mesh.position.distanceTo(actor.mesh.position)<7).sort((a,b)=>a.hp/a.maxHp-b.hp/b.maxHp)[0];
+      if(wounded&&actor.attackTimer<=0){wounded.hp=Math.min(wounded.maxHp,wounded.hp+12);createSlash(actor.mesh,wounded.mesh.position,0x55ff91);actor.attackTimer=actor.cooldown;}
+      const front=findTarget(actor),frontDist=front?actor.mesh.position.distanceTo(front.mesh.position):Infinity;
+      if(front&&frontDist>5){const direction=front.mesh.position.clone().sub(actor.mesh.position);direction.y=0;direction.normalize();actor.mesh.position.addScaledVector(direction,Math.min(actor.speed*dt,frontDist-5));actor.mesh.rotation.y=Math.atan2(direction.x,direction.z);animateActor(actor,dt,true);}
+      else animateActor(actor,dt,false);
+      continue;
+    }
+    const target=findTarget(actor);if(!target){animateActor(actor,dt,false);continue;}
+    const pos=actor.mesh.position,targetPos=target.mesh.position,dist=pos.distanceTo(targetPos);
+    const reach=combatRange(actor);
+    if(dist>reach){const direction=targetPos.clone().sub(pos);direction.y=0;direction.normalize();pos.addScaledVector(direction,Math.min(actor.speed*dt,dist-reach));actor.mesh.rotation.y=Math.atan2(direction.x,direction.z);animateActor(actor,dt,true);}
+    else{animateActor(actor,dt,false);if(actor.attackTimer<=0){playAttack(actor,target);actor.attackTimer=actor.cooldown;}}
+  }
+  for(let i=actors.length-1;i>=0;i--)if(actors[i].dead){scene.remove(actors[i].mesh);scene.remove(actors[i].bar);scene.remove(actors[i].label);actors.splice(i,1);if(selectedAlly?.dead)selectedAlly=null;}
+}
+function evolvedSelected(){
+  if(!selectedAlly){notify('Select an actor first.');return;}
+  if(!selectedAlly.isUnit){notify('Only units can evolve.');return;}
+  if(selectedAlly.evolved){notify('This unit is already evolved.');return;}
+  const actor=selectedAlly,old=actor.mesh,position=old.position.clone(),rotation=old.rotation.clone();
+  actor.evolved=true;actor.level=5;actor.maxHp=Math.round(actor.maxHp*1.5);actor.hp=actor.maxHp;actor.attack=Math.round(actor.attack*1.5);actor.defense+=4;
+  actor.mesh=makeEvolvedForm(actor);actor.mesh.position.copy(position);actor.mesh.rotation.copy(rotation);scene.remove(old);scene.add(actor.mesh);
+  actor.label.material.map?.dispose();scene.remove(actor.label);actor.label=makeTag(`${actor.mutation?actor.mutation.name+' ':''}${actor.def.name} · Evolved`,actor.mutation?.color||0xffdf7a);scene.add(actor.label);
+  notify(`${actor.def.name} evolved!`);updateSelection();
+}
+function clearActors(){
+  for(const actor of actors){scene.remove(actor.mesh);scene.remove(actor.bar);scene.remove(actor.label);}
+  actors.length=0;selectedAlly=null;updateSelection();updateHUD();
+}
+function toggleBattle(){
+  battleActive=!battleActive;
+  const button=document.getElementById('battleButton');button.classList.toggle('active',battleActive);button.textContent=battleActive?'Stop Battle':'Start Battle';
+  document.getElementById('battleState').textContent=battleActive?'Running':'Stopped';
+}
+function updatePlayer(dt){
+  const forward=new THREE.Vector3(Math.sin(cameraYaw),0,Math.cos(cameraYaw)),right=new THREE.Vector3(-Math.cos(cameraYaw),0,Math.sin(cameraYaw)),v=new THREE.Vector3();
+  if(keys.w||keys.arrowup)v.add(forward);if(keys.s||keys.arrowdown)v.sub(forward);if(keys.d||keys.arrowright)v.add(right);if(keys.a||keys.arrowleft)v.sub(right);
+  if(!panelOpen&&v.lengthSq()){v.normalize();player.position.addScaledVector(v,8*dt);player.rotation.y=Math.atan2(v.x,v.z);walkPhase+=dt*9;const limbs=player.userData.limbs;limbs.leftArm.rotation.x=Math.sin(walkPhase)*.5;limbs.rightArm.rotation.x=-Math.sin(walkPhase)*.5;limbs.leftLeg.rotation.x=-Math.sin(walkPhase)*.5;limbs.rightLeg.rotation.x=Math.sin(walkPhase)*.5;}
+  player.position.x=THREE.MathUtils.clamp(player.position.x,-78,78);player.position.z=THREE.MathUtils.clamp(player.position.z,-78,78);
+}
+function updateCamera(dt){
+  const horizontal=Math.cos(cameraPitch)*cameraDistance;
+  const desired=new THREE.Vector3(player.position.x-Math.sin(cameraYaw)*horizontal,Math.max(.85,player.position.y+2.2+Math.sin(cameraPitch)*cameraDistance),player.position.z-Math.cos(cameraYaw)*horizontal);
+  camera.position.lerp(desired,1-Math.exp(-14*dt));camera.lookAt(player.position.x,player.position.y+1.55,player.position.z);
+}
+document.addEventListener('keydown',event=>{
+  if(!accessGranted)return;
+  const key=event.key.toLowerCase();keys[key]=true;
+  if(key==='f'){panelOpen=!panelOpen;document.getElementById('adminPanel').classList.toggle('open',panelOpen);if(document.pointerLockElement)document.exitPointerLock?.();event.preventDefault();}
+  if(key==='escape'&&panelOpen){panelOpen=false;document.getElementById('adminPanel').classList.remove('open');}
+  if(key==='e'&&selectedAlly)evolvedSelected();
+});
+document.addEventListener('keyup',event=>{keys[event.key.toLowerCase()]=false;});
+renderer.domElement.addEventListener('pointerdown',event=>{if(event.button===0&&!panelOpen&&document.pointerLockElement!==renderer.domElement)renderer.domElement.requestPointerLock?.();});
+renderer.domElement.addEventListener('contextmenu',event=>event.preventDefault());
+document.addEventListener('mousemove',event=>{if(document.pointerLockElement===renderer.domElement){cameraYaw-=event.movementX*.0031;cameraPitch=THREE.MathUtils.clamp(cameraPitch-event.movementY*.0028,-.16,1.48);}});
+document.addEventListener('wheel',event=>{cameraDistance=THREE.MathUtils.clamp(cameraDistance+Math.sign(event.deltaY)*1.1,6.5,28);},{passive:true});
+document.getElementById('panelToggle').addEventListener('click',()=>{panelOpen=!panelOpen;document.getElementById('adminPanel').classList.toggle('open',panelOpen);});
+document.getElementById('spawnButton').addEventListener('click',spawnActor);
+document.getElementById('battleButton').addEventListener('click',toggleBattle);
+document.getElementById('clearButton').addEventListener('click',clearActors);
+document.getElementById('evolveButton').addEventListener('click',evolvedSelected);
+document.getElementById('adminPanel').addEventListener('click',event=>{const option=event.target.closest('option');if(option?.dataset.actorId){selectedAlly=actors.find(actor=>actor.def.id===option.dataset.actorId)||null;updateSelection();}});
+actorSelect.addEventListener('change',()=>{selectedAlly=null;updateSelection();});
+const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
+renderer.domElement.addEventListener('click',event=>{
+  if(panelOpen)return;
+  pointer.x=event.clientX/innerWidth*2-1;pointer.y=-(event.clientY/innerHeight)*2+1;raycaster.setFromCamera(pointer,camera);
+  const selectable=actors.filter(actor=>!actor.dead),hits=raycaster.intersectObjects(selectable.flatMap(actor=>{const meshes=[];actor.mesh.traverse(object=>{if(object.isMesh)meshes.push(object);});return meshes;}),false);
+  if(hits.length){selectedAlly=selectable.find(actor=>{let found=false;actor.mesh.traverse(object=>{if(object===hits[0].object)found=true;});return found;})||null;updateSelection();}
+});
+function frame(time=0){
+  requestAnimationFrame(frame);const dt=Math.min(.04,(time-lastTime)/1000||.016);lastTime=time;elapsed+=dt;
+  updatePlayer(dt);if(battleActive)updateBattle(dt);updatePositionTags();updateCamera(dt);renderer.render(scene,camera);
+}
+document.getElementById('evolveButton').disabled=true;
+updateSelection();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+updateHUD();frame();
+</script>
+</body>
+</html>

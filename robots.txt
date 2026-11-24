@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://nivek140201-pixel.github.io/citadel-guardians-admin-site/sitemap.xml
